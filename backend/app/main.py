@@ -8,6 +8,10 @@ from app.db import get_db, init_db
 from app.models import Shot
 from app.workers.jobs import enqueue_process_shot
 
+import json
+
+from fastapi.staticfiles import StaticFiles
+
 UPLOAD_DIR = "/data/uploads"
 
 app = FastAPI(title="Digital Coach ElfHoops")
@@ -46,10 +50,7 @@ def get_shot(shot_id: str, db: Session = Depends(get_db)):
     shot = db.get(Shot, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="Shot não encontrado.")
+    result = json.loads(shot.result_json) if shot.result_json else None
+    return {"shot_id": shot.id, "status": shot.status, "result": result, "created_at": shot.created_at}
 
-    return {
-        "shot_id": shot.id,
-        "status": shot.status,
-        "result": shot.result_json,
-        "created_at": shot.created_at.isoformat(),
-    }
+app.mount("/media", StaticFiles(directory="/data"), name="media")
