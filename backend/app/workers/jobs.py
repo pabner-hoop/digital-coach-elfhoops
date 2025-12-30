@@ -1,5 +1,7 @@
 import os
 import json
+
+import cv2
 from redis import Redis
 from rq import Queue
 from sqlalchemy import create_engine
@@ -7,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models import Shot
 from app.settings import settings
+from app.pose.video_io import read_frame_by_index
+from app.pose.draw import draw_pose
 
 
 def _redis_conn() -> Redis:
@@ -56,7 +60,7 @@ def process_shot(shot_id: str) -> None:
             max_side=720,
         )
 
-        ok_ratio = sum(1 for f in frames if f["ok"]) / max(1, len(frames))
+        ok_ratio = sum(1 for f in frames if f.get("ok")) / max(1, len(frames))
         if ok_ratio < 0.5:
             shot.status = "failed"
             shot.result_json = json.dumps(
@@ -80,11 +84,66 @@ def process_shot(shot_id: str) -> None:
         metrics = compute_metrics(frames, side, kf)
         overall, alerts = score_and_alerts(metrics)
 
+        # ---------- REPLAYS (opcional, não pode quebrar o job) ----------
+        replays = []
+        try:
+            media_dir = f"/data/shots/{shot_id}/replays"
+            os.makedirs(media_dir, exist_ok=True)
+
+            # Tenta chaves comuns que podem existir no seu pipeline
+            possible_kp_keys = [
+                "keypoints_px",
+                "keypoints",
+                "landmarks_px",
+                "landmarks",
+                "pose_landmarks",
+            ]
+
+            for name in ["set", "release", "follow"]:
+                frame_idx = kf.get(name)
+                if frame_idx is None:
+                    continue
+
+                frame = read_frame_by_index(shot.video_path, frame_idx)
+
+                frame_data = frames[frame_idx]
+                kp = None
+                for key in possible_kp_keys:
+                    if key in frame_data:
+                        kp = frame_data[key]
+                        break
+
+                if kp is None:
+                    print(
+                        f"[JOB] replay '{name}' ignorado: nenhum keypoints encontrado "
+                        f"(keys disponíveis: {list(frame_data.keys())})"
+                    )
+                    continue
+
+                frame = draw_pose(frame, kp)
+
+                out_path = os.path.join(media_dir, f"{name}.png")
+                cv2.imwrite(out_path, frame)
+
+                replays.append(
+                    {
+                        "name": name,
+                        "url": f"/media/shots/{shot_id}/replays/{name}.png",
+                        "frame_idx": frame_idx,
+                    }
+                )
+
+        except Exception as e:
+            # nunca falha o job inteiro por causa de replay
+            print(f"[JOB] falha gerando replays para {shot_id}: {e}")
+
         result = {
             "overall_score": overall,
             "side": side,
             "metrics": metrics,
             "alerts": alerts,
+            "replays": replays,
+            "keyframes": kf,
             "quality": {
                 "pose_ok_ratio": ok_ratio,
                 "frames_used": len(frames),
@@ -107,3 +166,4 @@ def process_shot(shot_id: str) -> None:
 
     finally:
         db.close()
+
