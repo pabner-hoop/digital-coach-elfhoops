@@ -67,3 +67,4 @@ volumes:
   pgdata:
   uploads:
   media_data:
+  uploads:
