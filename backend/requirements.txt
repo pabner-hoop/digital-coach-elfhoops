@@ -9,3 +9,11 @@ rq==2.0.0
 
 pydantic==2.10.3
 pydantic-settings==2.6.1
+
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+mediapipe==0.10.14
+
+python-multipart==0.0.9
+
+
