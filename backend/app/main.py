@@ -23,20 +23,14 @@ def health():
 
 @app.post("/shots")
 async def create_shot(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # validação básica
-    if not file.content_type or not file.content_type.startswith("video/"):
+    if not file.filename.lower().endswith((".mp4", ".mov", ".avi")):
         raise HTTPException(status_code=400, detail="Envie um arquivo de vídeo.")
 
     shot_id = str(uuid.uuid4())
-    filename = f"{shot_id}.mp4"
-    path = os.path.join(UPLOAD_DIR, filename)
+    path = os.path.join(UPLOAD_DIR, f"{shot_id}.mp4")
 
-    # salva no disco
     with open(path, "wb") as f:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
+        while chunk := await file.read(1024 * 1024):
             f.write(chunk)
 
     shot = Shot(id=shot_id, status="queued", video_path=path)
@@ -44,6 +38,7 @@ async def create_shot(file: UploadFile = File(...), db: Session = Depends(get_db
     db.commit()
 
     job_id = enqueue_process_shot(shot_id)
+
     return {"shot_id": shot_id, "status": "queued", "job_id": job_id}
 
 @app.get("/shots/{shot_id}")
